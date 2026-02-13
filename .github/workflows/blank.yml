@@ -1,0 +1,150 @@
+name: Ultimate-Win10-CRD-Parallel-5
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    # هذه الاستراتيجية تشغل 5 نسخ من الكود في نفس الوقت
+    strategy:
+      fail-fast: false
+      matrix:
+        job_id: [1, 2, 3, 4, 5]
+
+    steps:
+      # -----------------------------------------------------------
+      # خطوة 1: اختيار كود CRD المناسب بناءً على رقم الجوب
+      # -----------------------------------------------------------
+      - name: Select CRD Code based on Matrix ID
+        shell: pwsh
+        env:
+          # استدعاء كل الأكواد هنا ليمكن اختيار واحد منها
+          CODE_1: ${{ secrets.CRD_CODE }}
+          CODE_2: ${{ secrets.CRD_CODE1 }}
+          CODE_3: ${{ secrets.CRD_CODE2 }}
+          CODE_4: ${{ secrets.CRD_CODE3 }}
+          CODE_5: ${{ secrets.CRD_CODE4 }}
+        run: |
+          $id = ${{ matrix.job_id }}
+          $selectedCode = ""
+          
+          if ($id -eq 1) { $selectedCode = $env:CODE_1 }
+          elseif ($id -eq 2) { $selectedCode = $env:CODE_2 }
+          elseif ($id -eq 3) { $selectedCode = $env:CODE_3 }
+          elseif ($id -eq 4) { $selectedCode = $env:CODE_4 }
+          elseif ($id -eq 5) { $selectedCode = $env:CODE_5 }
+          
+          if ([string]::IsNullOrWhiteSpace($selectedCode)) {
+            Write-Error "CRD Code is empty for Job ID $id. Please check GitHub Secrets."
+          }
+          
+          # حفظ الكود المختار في متغير بيئة لاستخدامه لاحقاً
+          echo "CURRENT_CRD_CODE=$selectedCode" >> $env:GITHUB_ENV
+          Write-Host "✅ Selected CRD Code for Job $id"
+
+      # -----------------------------------------------------------
+      # خطوة 2: تثبيت متصفح كروم وخدمة الريموت (الأولوية القصوى)
+      # -----------------------------------------------------------
+      - name: Download and Install Chrome & CRD
+        shell: pwsh
+        run: |
+          Write-Host "⬇️ Downloading Chrome..."
+          Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile "chrome_installer.exe"
+          Start-Process -FilePath "chrome_installer.exe" -Args "/silent /install" -Wait
+          
+          Write-Host "⬇️ Downloading CRD Host..."
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
+          Write-Host "✅ Chrome & CRD Installed."
+
+      # -----------------------------------------------------------
+      # خطوة 3: جلب رقم العداد لتسمية الجهاز
+      # -----------------------------------------------------------
+      - name: Manage External Counter (Gist)
+        shell: pwsh
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+        run: |
+          $headers = @{ "Authorization" = "token $env:GIST_TOKEN"; "Accept" = "application/vnd.github.v3+json" }
+          $url = "https://api.github.com/gists/$env:GIST_ID"
+          $success = $false
+          $retryCount = 0
+
+          while (-not $success) {
+              try {
+                  $response = Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop
+                  $currentCount = [int]$response.files."counter.txt".content
+                  $newCount = $currentCount + 1
+                  
+                  $body = @{ files = @{ "counter.txt" = @{ content = [string]$newCount } } } | ConvertTo-Json -Depth 10
+                  Invoke-RestMethod -Uri $url -Headers $headers -Method Patch -Body $body -ErrorAction Stop
+                  
+                  echo "DEVICE_NUM=$newCount" >> $env:GITHUB_ENV
+                  $success = $true
+              }
+              catch {
+                  $sleepTime = Get-Random -Minimum 2 -Maximum 10
+                  Write-Host "⚠️ Conflict detected, retrying in $sleepTime seconds..."
+                  Start-Sleep -Seconds $sleepTime
+              }
+          }
+
+      # -----------------------------------------------------------
+      # خطوة 4: تفعيل الريموت ديسكتوب (قبل أي تحميلات ثقيلة)
+      # -----------------------------------------------------------
+      - name: Register and Start Chrome Remote Desktop
+        shell: pwsh
+        env:
+          CRD_PIN: ${{ secrets.CRD_PIN }}
+          # نستخدم الكود الذي تم اختياره في الخطوة الأولى
+          CRD_CODE: ${{ env.CURRENT_CRD_CODE }}
+        run: |
+          $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
+          
+          Write-Host "🚀 ACTIVATING CRD NOW to prevent timeout..."
+          Write-Host "Name: $UniqueName"
+          
+          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
+
+      # -----------------------------------------------------------
+      # خطوة 5: تثبيت VirtualBox (يعمل في الخلفية والريموت شغال)
+      # -----------------------------------------------------------
+      - name: Install VirtualBox 6.1.48
+        shell: pwsh
+        run: |
+          $vboxUrl = "https://download.virtualbox.org/virtualbox/6.1.48/VirtualBox-6.1.48-159471-Win.exe"
+          (New-Object System.Net.WebClient).DownloadFile($vboxUrl, "VirtualBox-Setup.exe")
+          Start-Process -FilePath "VirtualBox-Setup.exe" -Args "--silent --ignore-reboot" -Wait
+
+      # -----------------------------------------------------------
+      # خطوة 6: تحميل وفك ضغط الملف الكبير (العملية الأطول)
+      # -----------------------------------------------------------
+      - name: Download and Extract to DESKTOP
+        shell: cmd
+        run: |
+          @echo off
+          cd /d "%USERPROFILE%\Desktop"
+          set "FILE_URL=https://huggingface.co/datasets/swelam100/rdp/resolve/main/win.zip"
+          
+          echo ⬇️ Downloading large file... (RDP is already active)
+          curl -L -o BigFile.zip "%FILE_URL%"
+          
+          echo 📦 Extracting files...
+          7z x BigFile.zip -y
+          del BigFile.zip
+          echo ✅ Done!
+
+      # -----------------------------------------------------------
+      # خطوة 7: رسالة النجاح والبقاء قيد التشغيل
+      # -----------------------------------------------------------
+      - name: Success Message & Keep Alive
+        shell: pwsh
+        run: |
+          $FinalName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
+          Write-Host "✅ DONE! Connect to: $FinalName"
+          
+          # حلقة البقاء (Keep Alive)
+          while ($true) { Start-Sleep -Seconds 300 }
