@@ -19,7 +19,6 @@ jobs:
       - name: Select CRD Code based on Matrix ID
         shell: pwsh
         env:
-          # استدعاء كل الأكواد هنا ليمكن اختيار واحد منها
           CODE_1: ${{ secrets.CRD_CODE }}
           CODE_2: ${{ secrets.CRD_CODE1 }}
           CODE_3: ${{ secrets.CRD_CODE2 }}
@@ -39,7 +38,6 @@ jobs:
             Write-Error "CRD Code is empty for Job ID $id. Please check GitHub Secrets."
           }
           
-          # حفظ الكود المختار في متغير بيئة لاستخدامه لاحقاً
           echo "CURRENT_CRD_CODE=$selectedCode" >> $env:GITHUB_ENV
           Write-Host "✅ Selected CRD Code for Job $id"
 
@@ -98,7 +96,6 @@ jobs:
         shell: pwsh
         env:
           CRD_PIN: ${{ secrets.CRD_PIN }}
-          # نستخدم الكود الذي تم اختياره في الخطوة الأولى
           CRD_CODE: ${{ env.CURRENT_CRD_CODE }}
         run: |
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -120,7 +117,7 @@ jobs:
           Start-Process -FilePath "VirtualBox-Setup.exe" -Args "--silent --ignore-reboot" -Wait
 
       # -----------------------------------------------------------
-      # خطوة 6: تحميل وفك ضغط الملف الكبير (العملية الأطول)
+      # خطوة 6: تحميل وفك ضغط الملف الكبير
       # -----------------------------------------------------------
       - name: Download and Extract to DESKTOP
         shell: cmd
@@ -138,7 +135,51 @@ jobs:
           echo ✅ Done!
 
       # -----------------------------------------------------------
-      # خطوة 7: رسالة النجاح والبقاء قيد التشغيل
+      # خطوة 7: تسجيل النسخة، عمل Linked Clone، وتشغيل الاثنين معاً
+      # -----------------------------------------------------------
+      - name: Setup VirtualBox VMs and Start Both
+        shell: pwsh
+        run: |
+          # مسار أداة التحكم في VirtualBox
+          $vboxManage = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe"
+          
+          # مسار المجلد الذي تم فك الضغط فيه (نفترض أن المجلد الناتج اسمه win)
+          $winFolder = "$env:USERPROFILE\Desktop\win"
+          
+          # البحث عن ملف إعدادات الماكينة (.vbox)
+          $vboxFile = Get-ChildItem -Path $winFolder -Filter *.vbox -Recurse | Select-Object -First 1
+          
+          if ($vboxFile) {
+              $vmPath = $vboxFile.FullName
+              $vmName = $vboxFile.BaseName
+              $cloneName = "$vmName-LinkedClone"
+              $snapshotName = "AutoBaseSnapshot-$(Get-Date -Format 'yyyyMMddHHmmss')"
+              
+              Write-Host "📦 1. Registering the original VM ($vmName)..."
+              & $vboxManage registervm "$vmPath"
+              
+              Write-Host "📸 2. Taking a fresh snapshot for linking..."
+              & $vboxManage snapshot "$vmName" take "$snapshotName"
+              
+              Write-Host "🧬 3. Creating the Linked Clone ($cloneName)..."
+              & $vboxManage clonevm "$vmName" --snapshot "$snapshotName" --options link --name "$cloneName" --register
+              
+              Write-Host "🚀 4. Starting the ORIGINAL VM..."
+              & $vboxManage startvm "$vmName" --type gui
+              
+              # انتظار بضع ثوانٍ لتجنب أي تعارض أثناء الإقلاع
+              Start-Sleep -Seconds 10
+              
+              Write-Host "🚀 5. Starting the LINKED CLONE VM..."
+              & $vboxManage startvm "$cloneName" --type gui
+              
+              Write-Host "✅ Both VMs have been successfully started!"
+          } else {
+              Write-Error "❌ Could not find a .vbox file inside $winFolder. Check the extracted folder name."
+          }
+
+      # -----------------------------------------------------------
+      # خطوة 8: رسالة النجاح والبقاء قيد التشغيل
       # -----------------------------------------------------------
       - name: Success Message & Keep Alive
         shell: pwsh
