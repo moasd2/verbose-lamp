@@ -90,10 +90,10 @@ jobs:
           del BigFile.zip
           echo ✅ Download and Extraction Complete.
 
+# -----------------------------------------------------------
+      # خطوة 5: تسجيل النظام وتشغيله (بدون نسخ)
       # -----------------------------------------------------------
-      # خطوة 5: إنشاء Linked Clone وتشغيل النسختين
-      # -----------------------------------------------------------
-      - name: Setup Linked Clone and Start Both
+      - name: Register and Start VM
         shell: pwsh
         run: |
           $vboxManage = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe"
@@ -105,29 +105,16 @@ jobs:
           if ($vboxFile) {
               $vmPath = $vboxFile.FullName
               $originalVmName = $vboxFile.BaseName
-              $cloneVmName = "${originalVmName}_Clone"
               
-              # 1. تسجيل النسخة الأصلية
-              Write-Host "📦 Registering Original VM ($originalVmName)..."
+              # 1. تسجيل النسخة
+              Write-Host "📦 Registering VM ($originalVmName)..."
               & $vboxManage registervm "$vmPath"
 
-              # 2. أخذ Snapshot (ضروري لعمل Linked Clone)
-              Write-Host "📸 Taking Snapshot for Cloning..."
-              & $vboxManage snapshot "$originalVmName" take "BaseSnap"
-              
-              # 3. إنشاء Linked Clone
-              Write-Host "🐑 Creating Linked Clone ($cloneVmName)..."
-              & $vboxManage clonevm "$originalVmName" --snapshot "BaseSnap" --name "$cloneVmName" --options link --register
-              
-              # 4. تشغيل النسخة الأصلية
-              Write-Host "🚀 Starting Original VM..."
+              # 2. تشغيل النسخة
+              Write-Host "🚀 Starting VM..."
               & $vboxManage startvm "$originalVmName" --type gui
-
-              # 5. تشغيل النسخة المستنسخة
-              Write-Host "🚀 Starting Clone VM..."
-              & $vboxManage startvm "$cloneVmName" --type gui
               
-              Write-Host "✅ Both VMs Started Successfully!"
+              Write-Host "✅ VM Started Successfully!"
           } else {
               Write-Error "❌ Could not find a .vbox file inside the folder."
           }
