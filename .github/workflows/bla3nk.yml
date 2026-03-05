@@ -90,10 +90,10 @@ jobs:
           del BigFile.zip
           echo ✅ Download and Extraction Complete.
 
-# -----------------------------------------------------------
-      # خطوة 5: تسجيل النظام وتشغيله (بدون نسخ)
       # -----------------------------------------------------------
-      - name: Register and Start VM
+      # خطوة 5: تسجيل النظام، إنشاء Linked Clone، وتشغيلهما
+      # -----------------------------------------------------------
+      - name: Register, Clone and Start VMs
         shell: pwsh
         run: |
           $vboxManage = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe"
@@ -105,16 +105,32 @@ jobs:
           if ($vboxFile) {
               $vmPath = $vboxFile.FullName
               $originalVmName = $vboxFile.BaseName
+              $cloneName = "$originalVmName-LinkedClone"
               
-              # 1. تسجيل النسخة
-              Write-Host "📦 Registering VM ($originalVmName)..."
+              # 1. تسجيل النسخة الأصلية
+              Write-Host "📦 Registering Original VM ($originalVmName)..."
               & $vboxManage registervm "$vmPath"
 
-              # 2. تشغيل النسخة
-              Write-Host "🚀 Starting VM..."
+              # 2. أخذ لقطة (Snapshot) - خطوة إجبارية لعمل Linked Clone
+              Write-Host "📸 Taking Snapshot from saved state..."
+              & $vboxManage snapshot "$originalVmName" take "BaseSnap"
+
+              # 3. إنشاء نسخة مرتبطة (Linked Clone) من اللقطة وتسجيلها تلقائياً
+              Write-Host "🧬 Creating Linked Clone ($cloneName)..."
+              & $vboxManage clonevm "$originalVmName" --snapshot "BaseSnap" --options link --name "$cloneName" --register
+
+              # 4. تشغيل النسخة الأصلية (ستستأنف من وضع Save State)
+              Write-Host "🚀 Starting Original VM..."
               & $vboxManage startvm "$originalVmName" --type gui
               
-              Write-Host "✅ VM Started Successfully!"
+              # انتظار 10 ثوانٍ لتخفيف الضغط على المعالج والقرص أثناء الاستئناف
+              Start-Sleep -Seconds 10 
+
+              # 5. تشغيل النسخة المستنسخة (ستستأنف أيضاً من وضع Save State)
+              Write-Host "🚀 Starting Linked Clone VM..."
+              & $vboxManage startvm "$cloneName" --type gui
+              
+              Write-Host "✅ Both VMs Started Successfully!"
           } else {
               Write-Error "❌ Could not find a .vbox file inside the folder."
           }
