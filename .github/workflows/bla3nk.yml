@@ -1,4 +1,4 @@
-name: Ultimate-Win10-CRD-Counter-Optimized
+name: Ultimate-Win10-No-CRD-Optimized
 
 on: 
   workflow_dispatch:
@@ -8,98 +8,37 @@ jobs:
     runs-on: windows-2022
     steps:
       
-      # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
-      # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, VBox)
+      # 1. تثبيت VirtualBox فقط
+      - name: Install VirtualBox
         shell: pwsh
         run: |
-          Write-Host "⬇️ Downloading Chrome..."
-          Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile "chrome_installer.exe"
-          Start-Process -FilePath "chrome_installer.exe" -Args "/silent /install" -Wait
-          
-          Write-Host "⬇️ Downloading CRD Host..."
-          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
-          Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
-
           Write-Host "⬇️ Downloading VirtualBox..."
           $vboxUrl = "https://download.virtualbox.org/virtualbox/6.1.48/VirtualBox-6.1.48-159471-Win.exe"
           (New-Object System.Net.WebClient).DownloadFile($vboxUrl, "VirtualBox-Setup.exe")
           Start-Process -FilePath "VirtualBox-Setup.exe" -Args "--silent --ignore-reboot" -Wait
-          Write-Host "✅ All Software Installed Successfully."
+          Write-Host "✅ VirtualBox Installed Successfully."
 
-      # -----------------------------------------------------------
-      # خطوة 2: إدارة العداد
-      # -----------------------------------------------------------
-      - name: Manage External Counter (Gist)
-        shell: pwsh
-        env:
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
-          GIST_ID: ${{ secrets.GIST_ID }}
-        run: |
-          $headers = @{ "Authorization" = "token $env:GIST_TOKEN"; "Accept" = "application/vnd.github.v3+json" }
-          $url = "https://api.github.com/gists/$env:GIST_ID"
-          $success = $false
-          
-          while (-not $success) {
-              try {
-                  $response = Invoke-RestMethod -Uri $url -Headers $headers -Method Get -ErrorAction Stop
-                  $currentCount = [int]$response.files."counter.txt".content
-                  $newCount = $currentCount + 1
-                  
-                  $body = @{ files = @{ "counter.txt" = @{ content = [string]$newCount } } } | ConvertTo-Json -Depth 10
-                  Invoke-RestMethod -Uri $url -Headers $headers -Method Patch -Body $body -ErrorAction Stop
-                  
-                  echo "DEVICE_NUM=$newCount" >> $env:GITHUB_ENV
-                  Write-Host "✅ Counter Updated to: $newCount"
-                  $success = $true
-              }
-              catch {
-                  Start-Sleep -Seconds (Get-Random -Minimum 1 -Maximum 5)
-              }
-          }
-
-      # -----------------------------------------------------------
-      # خطوة 3: تفعيل الريموت ديسكتوب
-      # -----------------------------------------------------------
-      - name: Start Chrome Remote Desktop
-        shell: pwsh
-        env:
-          CRD_CODE: ${{ secrets.CRD_CODE3 }}
-          CRD_PIN: ${{ secrets.CRD_PIN }}
-        run: |
-          $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
-          
-          Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
-          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
-
-      # -----------------------------------------------------------
-      # خطوة 4: تحميل وفك الضغط (تم إصلاح الخطأ هنا)
-      # -----------------------------------------------------------
+      # 2. تحميل وفك ضغط النظام (OS)
       - name: Download and Extract OS
         shell: cmd
         run: |
           @echo off
           cd /d "%USERPROFILE%\Desktop"
           set "FILE_URL=https://huggingface.co/datasets/gfdg34fsd/rdp/resolve/main/wino.zip"
-          echo ⬇️ Downloading large file...
+          echo ⬇️ Downloading OS files...
           curl -L -o BigFile.zip "%FILE_URL%"
           echo 📦 Extracting files...
           7z x BigFile.zip -y
           del BigFile.zip
-          echo ✅ Download and Extraction Complete.
+          echo ✅ Extraction Complete.
 
-# -----------------------------------------------------------
-      # خطوة 5: تسجيل النظام، عمل Linked Clone، وتشغيلهما معا
-      # -----------------------------------------------------------
-      - name: Register, Clone, and Start VMs
+      # 3. تسجيل النظام وتشغيله في الخلفية
+      - name: Register and Start VMs
         shell: pwsh
         run: |
           $vboxManage = "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe"
           $winFolder = "$env:USERPROFILE\Desktop\wino"
           
-          # البحث عن ملف VBox
           $vboxFile = Get-ChildItem -Path $winFolder -Filter *.vbox -Recurse | Select-Object -First 1
           
           if ($vboxFile) {
@@ -107,36 +46,27 @@ jobs:
               $originalVmName = $vboxFile.BaseName
               $cloneName = "$originalVmName-Clone"
               
-              # 1. تسجيل النسخة الأصلية
-              Write-Host "📦 Registering Original VM ($originalVmName)..."
+              Write-Host "📦 Registering VM..."
               & $vboxManage registervm "$vmPath"
-
-              # 2. أخذ لقطة (Snapshot) - خطوة إجبارية لعمل Linked Clone
-              Write-Host "📸 Taking snapshot for Linked Clone..."
-              & $vboxManage snapshot "$originalVmName" take "BaseSnap" --description "Base for Linked Clone"
-
-              # 3. إنشاء الـ Linked Clone وتسجيله
-              Write-Host "🧬 Creating Linked Clone ($cloneName)..."
+              
+              Write-Host "📸 Creating Snapshot..."
+              & $vboxManage snapshot "$originalVmName" take "BaseSnap"
+              
+              Write-Host "🧬 Creating Linked Clone..."
               & $vboxManage clonevm "$originalVmName" --snapshot "BaseSnap" --options link --name "$cloneName" --register
 
-              # 4. تشغيل النسخة الأصلية
-              Write-Host "🚀 Starting Original VM..."
-              & $vboxManage startvm "$originalVmName" --type gui
-
-              # 5. تشغيل النسخة المنسوخة (Linked Clone)
-              Write-Host "🚀 Starting Linked Clone VM..."
-              & $vboxManage startvm "$cloneName" --type gui
+              Write-Host "🚀 Starting VMs in Headless Mode (Background)..."
+              & $vboxManage startvm "$originalVmName" --type headless
+              & $vboxManage startvm "$cloneName" --type headless
               
-              Write-Host "✅ Both VMs Started Successfully!"
+              Write-Host "✅ Both VMs are running in the background."
           } else {
-              Write-Error "❌ Could not find a .vbox file inside the folder."
+              Write-Error "❌ Could not find a .vbox file."
           }
 
-      # -----------------------------------------------------------
-      # خطوة 6: البقاء
-      # -----------------------------------------------------------
+      # 4. البقاء نشطاً (حتى لا ينتهي الـ Workflow فوراً)
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ Both VMs are running..."
+          Write-Host "✅ System is active. Running for 6 hours or until manual stop."
           while ($true) { Start-Sleep -Seconds 300 }
